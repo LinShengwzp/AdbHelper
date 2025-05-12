@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">AdbHelper</string>
+
+    <string name="auto_shell_key">auto_shell</string>
+    <string name="buffer_size_key">buffer_size</string>
+    <string name="startup_command_key">startup_command</string>
+    <string name="pref_key_verified" translatable="false">verified</string>
+    <string name="paired_key">paired</string>
+</resources>
