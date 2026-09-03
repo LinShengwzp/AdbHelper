@@ -52,7 +52,10 @@ import com.anmi.adbhelper.commons.log
 import com.draco.ladb.viewmodels.AdbViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class AppInfo(
     val appName: String,
@@ -81,12 +84,14 @@ fun ProcessScreenView(topBar: @Composable () -> Unit = {}, viewModel: AdbViewMod
     val outputText by viewModel.outputText.observeAsState()
     var expectedCommand by remember { mutableStateOf<String?>(null) }
 
-    fun refreshDevices() {
-        scope.launch(Dispatchers.IO) {
-            while (!connectSuccess) {
-                expectedCommand = "devices"
-                viewModel.adb.adb(true, listOf("devices"))
-                delay(100)
+    suspend fun refreshDevices() {
+        while (!connectSuccess && currentCoroutineContext().isActive) {
+            expectedCommand = "devices"
+            withContext(Dispatchers.IO) {
+                viewModel.adb.adb(true, listOf("devices")).waitFor()
+            }
+            if (!connectSuccess) {
+                delay(1_000)
             }
         }
     }

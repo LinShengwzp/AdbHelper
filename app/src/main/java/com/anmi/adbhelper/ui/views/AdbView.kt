@@ -57,7 +57,10 @@ import com.anmi.adbhelper.ui.navigate.AppRoute
 import com.draco.ladb.viewmodels.AdbViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
 @Composable
@@ -102,12 +105,14 @@ fun AdbScreenView(topBar: @Composable () -> Unit = {}, viewModel: AdbViewModel) 
     var newCommandName by remember { mutableStateOf("") }
     var newCommandValue by remember { mutableStateOf("") }
 
-    fun refreshDevices() {
-        scope.launch(Dispatchers.IO) {
-            while (!connectSuccess) {
-                expectedCommand = "devices"
-                viewModel.adb.adb(true, listOf("devices"))
-                delay(100)
+    suspend fun refreshDevices() {
+        while (!connectSuccess && currentCoroutineContext().isActive) {
+            expectedCommand = "devices"
+            withContext(Dispatchers.IO) {
+                viewModel.adb.adb(true, listOf("devices")).waitFor()
+            }
+            if (!connectSuccess) {
+                delay(1_000)
             }
         }
     }
@@ -126,7 +131,6 @@ fun AdbScreenView(topBar: @Composable () -> Unit = {}, viewModel: AdbViewModel) 
     }
 
     LaunchedEffect(Unit) {
-        refreshDevices()
         val stored = CommandStore.loadCommands(context)
         if (stored.isEmpty()) {
             commandList.addAll(defaultCommands)
@@ -134,6 +138,10 @@ fun AdbScreenView(topBar: @Composable () -> Unit = {}, viewModel: AdbViewModel) 
         } else {
             commandList.addAll(stored)
         }
+    }
+
+    LaunchedEffect(Unit) {
+        refreshDevices()
     }
 
     LaunchedEffect(outputText) {
