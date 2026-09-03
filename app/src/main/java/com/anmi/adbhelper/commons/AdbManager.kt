@@ -201,6 +201,7 @@ class ADB(private val context: Context) {
             adb(false, listOf("start-server")).waitFor()
             debug("Waiting for device to connect...")
             debug("This may take a minute")
+            val readyDeadline = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(1)
             val waitProcess = adb(false, listOf("wait-for-device")).waitFor(1, TimeUnit.MINUTES)
             if (!waitProcess) {
                 debug("Your device didn't connect to LADB")
@@ -208,6 +209,17 @@ class ADB(private val context: Context) {
 
                 tryingToPair = false
                 diagLog("ADB_INIT_SERVER_FAILED invocationId=$invocationId thread=${Thread.currentThread().name} reason=wait-for-device timeout")
+                return false
+            }
+            debug("Waiting for authorized ADB device...")
+            var authorizedDeviceReady = hasAuthorizedDevice()
+            while (!authorizedDeviceReady && System.currentTimeMillis() < readyDeadline) {
+                Thread.sleep(1_000)
+                authorizedDeviceReady = hasAuthorizedDevice()
+            }
+            if (!authorizedDeviceReady) {
+                tryingToPair = false
+                diagLog("ADB_INIT_SERVER_FAILED invocationId=$invocationId thread=${Thread.currentThread().name} reason=authorized-device timeout")
                 return false
             }
         }
@@ -251,6 +263,21 @@ class ADB(private val context: Context) {
 
     private fun isUSBDebuggingEnabled() =
         Settings.Global.getInt(context.contentResolver, Settings.Global.ADB_ENABLED, 0) == 1
+
+    private fun hasAuthorizedDevice(): Boolean {
+        val process = adb(false, listOf("devices"))
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        val exitCode = process.waitFor()
+        if (exitCode != 0) return false
+        return output.lineSequence()
+            .drop(1)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .any { line ->
+                val parts = line.split('\t', limit = 2)
+                parts.size == 2 && parts[1].trim() == "device"
+            }
+    }
 
     /**
      * Wait restart the shell once it dies
