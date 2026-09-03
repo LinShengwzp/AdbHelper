@@ -104,6 +104,11 @@ fun AdbScreenView(topBar: @Composable () -> Unit = {}, viewModel: AdbViewModel) 
     var showAddCommandDialog by remember { mutableStateOf(false) }
     var newCommandName by remember { mutableStateOf("") }
     var newCommandValue by remember { mutableStateOf("") }
+    var showPairDialog by remember { mutableStateOf(false) }
+    var pairingPort by remember { mutableStateOf("") }
+    var pairingCode by remember { mutableStateOf("") }
+    var pairingInProgress by remember { mutableStateOf(false) }
+    var pairingMessage by remember { mutableStateOf<String?>(null) }
 
     suspend fun refreshDevices() {
         while (!connectSuccess && currentCoroutineContext().isActive) {
@@ -220,6 +225,17 @@ fun AdbScreenView(topBar: @Composable () -> Unit = {}, viewModel: AdbViewModel) 
 
             Spacer(Modifier.height(12.dp))
 
+            Button(
+                onClick = {
+                    pairingMessage = null
+                    showPairDialog = true
+                }
+            ) {
+                Text("配对设备")
+            }
+
+            Spacer(Modifier.height(12.dp))
+
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -285,6 +301,76 @@ fun AdbScreenView(topBar: @Composable () -> Unit = {}, viewModel: AdbViewModel) 
             },
             dismissButton = {
                 Button(onClick = { showAddCommandDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showPairDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!pairingInProgress) showPairDialog = false },
+            title = { Text("配对无线调试") },
+            text = {
+                Column {
+                    Text("请在“开发者选项 → 无线调试 → 使用配对码配对设备”中查看端口和配对码。")
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = pairingPort,
+                        onValueChange = { pairingPort = it },
+                        label = { Text("配对端口") }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = pairingCode,
+                        onValueChange = { pairingCode = it },
+                        label = { Text("6位配对码") }
+                    )
+                    if (pairingMessage != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(pairingMessage!!)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !pairingInProgress,
+                    onClick = {
+                        if (pairingInProgress) return@Button
+                        val port = pairingPort.trim()
+                        val code = pairingCode.trim()
+                        val portNumber = port.toIntOrNull()
+                        val validPort = portNumber != null && portNumber in 1..65535
+                        val validCode = code.length == 6 && code.all { it.isDigit() }
+                        if (!validPort) {
+                            pairingMessage = "端口必须是 1-65535 的数字"
+                            return@Button
+                        }
+                        if (!validCode) {
+                            pairingMessage = "配对码必须是 6 位数字"
+                            return@Button
+                        }
+                        pairingInProgress = true
+                        pairingMessage = null
+                        scope.launch {
+                            val success = withContext(Dispatchers.IO) {
+                                viewModel.adb.pair(port, code)
+                            }
+                            pairingInProgress = false
+                            if (success) {
+                                viewModel.setPairedBefore(true)
+                                pairingMessage = "配对成功。如未自动建立 ADB 连接，请重新打开应用。"
+                            } else {
+                                pairingMessage = "配对失败，请确认端口和配对码仍然有效后重试。"
+                            }
+                        }
+                    }
+                ) {
+                    Text(if (pairingInProgress) "配对中…" else "开始配对")
+                }
+            },
+            dismissButton = {
+                Button(onClick = { showPairDialog = false }) {
                     Text("取消")
                 }
             }
