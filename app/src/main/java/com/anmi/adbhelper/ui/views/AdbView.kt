@@ -55,6 +55,7 @@ import com.anmi.adbhelper.models.AdbCommand
 import com.anmi.adbhelper.models.CommandStore
 import com.anmi.adbhelper.ui.navigate.AppRoute
 import com.draco.ladb.viewmodels.AdbViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
@@ -109,6 +110,9 @@ fun AdbScreenView(topBar: @Composable () -> Unit = {}, viewModel: AdbViewModel) 
     var pairingCode by remember { mutableStateOf("") }
     var pairingInProgress by remember { mutableStateOf(false) }
     var pairingMessage by remember { mutableStateOf<String?>(null) }
+
+    var authorizationInProgress by remember { mutableStateOf(false) }
+    var authorizationMessage by remember { mutableStateOf<String?>(null) }
 
     suspend fun refreshDevices() {
         while (!connectSuccess && currentCoroutineContext().isActive) {
@@ -225,13 +229,54 @@ fun AdbScreenView(topBar: @Composable () -> Unit = {}, viewModel: AdbViewModel) 
 
             Spacer(Modifier.height(12.dp))
 
-            Button(
-                onClick = {
-                    pairingMessage = null
-                    showPairDialog = true
-                }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("配对设备")
+                Button(
+                    onClick = {
+                        pairingMessage = null
+                        showPairDialog = true
+                    }
+                ) {
+                    Text("配对设备")
+                }
+
+                OutlinedButton(
+                    enabled = !authorizationInProgress,
+                    onClick = {
+                        if (authorizationInProgress) return@OutlinedButton
+                        authorizationInProgress = true
+                        authorizationMessage = null
+
+                        scope.launch {
+                            try {
+                                val completed = withContext(Dispatchers.IO) {
+                                    viewModel.adb.requestAuthorizationPrompt()
+                                }
+
+                                authorizationMessage = if (completed) {
+                                    "已检测到 ADB 连接，请在系统授权弹窗中允许调试。"
+                                } else {
+                                    "授权请求已发起，如未出现弹窗请确认无线调试已开启后重试。"
+                                }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Exception) {
+                                authorizationMessage = "授权请求失败，请确认无线调试已开启后重试。"
+                            } finally {
+                                authorizationInProgress = false
+                            }
+                        }
+                    }
+                ) {
+                    Text(if (authorizationInProgress) "请求中…" else "请求授权")
+                }
+            }
+
+            authorizationMessage?.let { message ->
+                Spacer(Modifier.height(8.dp))
+                Text(message, color = Color.White)
             }
 
             Spacer(Modifier.height(12.dp))

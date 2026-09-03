@@ -296,6 +296,29 @@ class ADB(private val context: Context) {
         }
     }
 
+    fun requestAuthorizationPrompt(timeoutSeconds: Long = 15): Boolean {
+        val invocationId = nextInvocationId()
+        diagLog(
+            "ADB_AUTH_REQUEST_START invocationId=$invocationId " +
+                "thread=${Thread.currentThread().name} timeoutSeconds=$timeoutSeconds"
+        )
+
+        val waitProcess = adb(false, listOf("wait-for-device"))
+        return try {
+            val completed = waitProcess.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+            diagLog(
+                "ADB_AUTH_REQUEST_DONE invocationId=$invocationId " +
+                    "thread=${Thread.currentThread().name} completed=$completed"
+            )
+            completed
+        } finally {
+            if (waitProcess.isAlive) {
+                waitProcess.destroyForcibly()
+                waitProcess.waitFor()
+            }
+        }
+    }
+
     /**
      * Ask the device to pair on Android 11+ devices
      */
