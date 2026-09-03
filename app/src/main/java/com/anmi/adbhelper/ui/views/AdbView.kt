@@ -107,9 +107,22 @@ fun AdbScreenView(topBar: @Composable () -> Unit = {}, viewModel: AdbViewModel) 
 
     suspend fun refreshDevices() {
         while (!connectSuccess && currentCoroutineContext().isActive) {
-            expectedCommand = "devices"
-            withContext(Dispatchers.IO) {
-                viewModel.adb.adb(true, listOf("devices")).waitFor()
+            val output = withContext(Dispatchers.IO) {
+                val process = viewModel.adb.adb(false, listOf("devices"))
+                val text = process.inputStream.bufferedReader().use { it.readText() }
+                val exitCode = process.waitFor()
+                if (exitCode == 0) text else ""
+            }
+
+            val lines = output.lines()
+                .drop(1)
+                .filter { it.contains("\tdevice") }
+                .map { it.split("\t")[0] }
+
+            devices = lines
+            if (selectedDevice == null && lines.isNotEmpty()) {
+                selectedDevice = lines.first()
+                connectSuccess = true
             }
             if (!connectSuccess) {
                 delay(1_000)

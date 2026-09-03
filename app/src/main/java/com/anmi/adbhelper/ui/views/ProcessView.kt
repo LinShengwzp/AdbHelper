@@ -84,18 +84,6 @@ fun ProcessScreenView(topBar: @Composable () -> Unit = {}, viewModel: AdbViewMod
     val outputText by viewModel.outputText.observeAsState()
     var expectedCommand by remember { mutableStateOf<String?>(null) }
 
-    suspend fun refreshDevices() {
-        while (!connectSuccess && currentCoroutineContext().isActive) {
-            expectedCommand = "devices"
-            withContext(Dispatchers.IO) {
-                viewModel.adb.adb(true, listOf("devices")).waitFor()
-            }
-            if (!connectSuccess) {
-                delay(1_000)
-            }
-        }
-    }
-
     fun loadProcesses() {
         if (selectedDevice == null) return
         scope.launch(Dispatchers.IO) {
@@ -138,6 +126,33 @@ fun ProcessScreenView(topBar: @Composable () -> Unit = {}, viewModel: AdbViewMod
                     "-3"
                 )
             )
+        }
+    }
+
+    suspend fun refreshDevices() {
+        while (!connectSuccess && currentCoroutineContext().isActive) {
+            val output = withContext(Dispatchers.IO) {
+                val process = viewModel.adb.adb(false, listOf("devices"))
+                val text = process.inputStream.bufferedReader().use { it.readText() }
+                val exitCode = process.waitFor()
+                if (exitCode == 0) text else ""
+            }
+
+            val lines = output.lines()
+                .drop(1)
+                .filter { it.contains("\tdevice") }
+                .map { it.split("\t")[0] }
+
+            devices = lines
+            if (selectedDevice == null && lines.isNotEmpty()) {
+                selectedDevice = lines.first()
+                connectSuccess = true
+                loadApplications()
+                loadProcesses()
+            }
+            if (!connectSuccess) {
+                delay(1_000)
+            }
         }
     }
 
