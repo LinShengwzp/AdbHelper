@@ -8,6 +8,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.util.Log
 import com.anmi.adbhelper.R
 import com.anmi.adbhelper.commons.ADB
 import com.anmi.adbhelper.commons.log
@@ -17,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 
 class AdbViewModel(private val context: Context) : ViewModel() {
     private val _outputText = MutableLiveData<String>()
@@ -29,11 +31,17 @@ class AdbViewModel(private val context: Context) : ViewModel() {
     private val sharedPreferences = context.getSharedPreferences("app_config", Context.MODE_PRIVATE)
     val adb = ADB.getInstance(context.applicationContext)
 
+    companion object {
+        private val requestCounter = AtomicLong(0)
+    }
+
     init {
         startOutputThread()
     }
 
     fun startADBServer(callback: ((Boolean) -> (Unit))? = null) {
+        val requestId = requestCounter.incrementAndGet()
+        Log.d("AdbDiag", "START_ADB_SERVER_REQUEST requestId=$requestId thread=${Thread.currentThread().name}")
         viewModelScope.launch(Dispatchers.IO) {
             log("Start adb server ...")
             val success = adb.initServer()

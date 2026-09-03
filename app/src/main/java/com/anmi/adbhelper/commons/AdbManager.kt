@@ -6,26 +6,33 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import com.anmi.adbhelper.R
 import io.github.muntashirakon.adb.AbsAdbConnectionManager
 import java.io.File
 import java.io.PrintStream
+import java.security.MessageDigest
+import java.security.KeyFactory
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.PrivateKey
 import java.security.cert.Certificate
+import java.security.spec.PKCS8EncodedKeySpec
+import java.security.spec.X509EncodedKeySpec
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import javax.security.auth.x500.X500Principal
+import kotlin.io.encoding.Base64
 
-class AdbManager private constructor() : AbsAdbConnectionManager() {
+class AdbManager private constructor(context: Context) : AbsAdbConnectionManager() {
     companion object {
         private var instance: AdbManager? = null
 
-        fun get(): AdbManager {
+        fun get(context: Context): AdbManager {
             if (instance == null) {
-                instance = AdbManager()
+                instance = AdbManager(context)
             }
             return instance!!
         }
@@ -33,6 +40,10 @@ class AdbManager private constructor() : AbsAdbConnectionManager() {
 
     private val keyPair: KeyPair
     private val certificate: Certificate
+
+    private val keyDir = File(context.filesDir, "adb_keys")
+    private val privateKeyFile = File(keyDir, "adbkey.pem")
+    private val publicKeyFile = File(keyDir, "adbkey.pub.pem")
 
     init {
         api = Build.VERSION.SDK_INT
@@ -80,6 +91,29 @@ class ADB(private val context: Context) {
 
     private var tryingToPair = false
 
+    private val diagSeq = AtomicLong(0)
+    private fun nextInvocationId(): Long = diagSeq.incrementAndGet()
+    private fun diagLog(msg: String) {
+        Log.d("AdbDiag", msg)
+    }
+    private fun adbKeyFile(): File = File(File(context.filesDir, ".android"), "adbkey")
+    private fun adbPubKeyFile(): File = File(File(context.filesDir, ".android"), "adbkey.pub")
+    private fun sha256Of(file: File): String = try {
+        val md = MessageDigest.getInstance("SHA-256")
+        val bytes = file.readBytes()
+        md.digest(bytes).joinToString("") { "%02x".format(it) }
+    } catch (e: Exception) {
+        "ERROR:${e.message}"
+    }
+    private fun formatAdbKeyDiag(file: File): String = if (!file.exists()) {
+        "MISSING path=${file.absolutePath}"
+    } else {
+        "exists=true path=${file.absolutePath} size=${file.length()} lastModified=${file.lastModified()} sha256=${sha256Of(file)}"
+    }
+    private fun logAdbKeys(phase: String, invocationId: Long) {
+        diagLog("ADB_KEY_${phase} invocationId=$invocationId ${formatAdbKeyDiag(adbKeyFile())} | ${formatAdbKeyDiag(adbPubKeyFile())}")
+    }
+
     /**
      * Is the shell closed for any reason?
      */
@@ -115,14 +149,18 @@ class ADB(private val context: Context) {
      * Start the ADB server
      */
     fun initServer(): Boolean {
+        val invocationId = nextInvocationId()
+        val autoShellPref = sharedPrefs.getBoolean(context.getString(R.string.auto_shell_key), false)
+        diagLog("ADB_INIT_SERVER invocationId=$invocationId thread=${Thread.currentThread().name} _started=${_started.value} tryingToPair=$tryingToPair shellProcessNull=${shellProcess == null} autoShell=$autoShellPref")
         if (_started.value == true || tryingToPair) {
             log("Shell already started")
+            diagLog("ADB_INIT_SERVER_EARLY_RETURN invocationId=$invocationId thread=${Thread.currentThread().name} _started=${_started.value} tryingToPair=$tryingToPair shellProcessNull=${shellProcess == null}")
             return true
         }
 
         tryingToPair = true
 
-        val autoShell = sharedPrefs.getBoolean(context.getString(R.string.auto_shell_key), false)
+        val autoShell = autoShellPref
 
         val secureSettingsGranted =
             context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
@@ -177,6 +215,7 @@ class ADB(private val context: Context) {
                 debug("If a reboot doesn't work, please contact support")
 
                 tryingToPair = false
+                diagLog("ADB_INIT_SERVER_FAILED invocationId=$invocationId thread=${Thread.currentThread().name} reason=wait-for-device timeout")
                 return false
             }
         }
@@ -215,6 +254,7 @@ class ADB(private val context: Context) {
         _started.postValue(true)
         tryingToPair = false
 
+        diagLog("ADB_INIT_SERVER_DONE invocationId=$invocationId thread=${Thread.currentThread().name} _started=${_started.value} tryingToPair=$tryingToPair shellProcessNull=${shellProcess == null} autoShell=$autoShell")
         return true
     }
 
@@ -228,10 +268,13 @@ class ADB(private val context: Context) {
      * Wait restart the shell once it dies
      */
     fun waitForDeathAndReset() {
+        val watcherId = nextInvocationId()
+        diagLog("ADB_WATCHER_START watcherId=$watcherId thread=${Thread.currentThread().name} shellProcessNull=${shellProcess == null} _started=${_started.value} tryingToPair=$tryingToPair")
         while (true) {
             shellProcess?.waitFor()
             _started.postValue(false)
             debug("Shell is dead, resetting")
+            diagLog("ADB_SERVER_KILL watcherId=$watcherId thread=${Thread.currentThread().name} shellProcessNull=${shellProcess == null} _started=${_started.value} tryingToPair=$tryingToPair")
             adb(false, listOf("kill-server")).waitFor()
             Thread.sleep(3_000)
             initServer()
@@ -268,10 +311,34 @@ class ADB(private val context: Context) {
      * Send a raw ADB command
      */
     fun adb(redirect: Boolean, command: List<String>): Process {
+        val invocationId = nextInvocationId()
+        logAdbKeys("BEFORE", invocationId)
         val commandList = command.toMutableList().also {
             it.add(0, adbPath)
         }
-        return shell(redirect, commandList)
+        val process = shell(redirect, commandList)
+        val pidStr = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) process.pid().toString() else "unsupported"
+        } catch (e: Exception) {
+            "error:${e.message}"
+        }
+        val home = context.filesDir.path
+        diagLog("ADB_ADB invocationId=$invocationId thread=${Thread.currentThread().name} command=${commandList.joinToString(" ")} pid=$pidStr HOME=$home adbkey=${adbKeyFile().absolutePath} adbkeyPub=${adbPubKeyFile().absolutePath} redirect=$redirect")
+        Thread {
+            try {
+                val exitCode = process.waitFor()
+                val pidAfter = try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) process.pid().toString() else "unsupported"
+                } catch (e: Exception) {
+                    "error:${e.message}"
+                }
+                diagLog("ADB_ADB_AFTER invocationId=$invocationId pid=$pidAfter exitCode=$exitCode command=${commandList.joinToString(" ")}")
+                logAdbKeys("AFTER", invocationId)
+            } catch (e: Exception) {
+                diagLog("ADB_ADB_AFTER_ERROR invocationId=$invocationId error=${e.message}")
+            }
+        }.apply { isDaemon = true; start() }
+        return process
     }
 
     /**
@@ -313,7 +380,7 @@ class ADB(private val context: Context) {
     fun debug(msg: String) {
         synchronized(outputBufferFile) {
             if (outputBufferFile.exists())
-                outputBufferFile.appendText("$msg" + System.lineSeparator())
+                outputBufferFile.appendText(msg + System.lineSeparator())
         }
     }
 }
