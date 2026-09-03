@@ -306,11 +306,15 @@ class ADB(private val context: Context) {
         val waitProcess = adb(false, listOf("wait-for-device"))
         return try {
             val completed = waitProcess.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+            val exitCode = if (completed) waitProcess.exitValue() else null
+            val success = completed && exitCode == 0
+
             diagLog(
                 "ADB_AUTH_REQUEST_DONE invocationId=$invocationId " +
-                    "thread=${Thread.currentThread().name} completed=$completed"
+                    "thread=${Thread.currentThread().name} completed=$completed " +
+                    "exitCode=${exitCode ?: "timeout"} success=$success"
             )
-            completed
+            success
         } finally {
             if (waitProcess.isAlive) {
                 waitProcess.destroyForcibly()
