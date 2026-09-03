@@ -226,10 +226,6 @@ class ADB(private val context: Context) {
         System.loadLibrary("adb")
         sendToShellProcess("alias adb=\"$adbPath\"")
 
-        if (!secureSettingsGranted) {
-            sendToShellProcess("pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS &> /dev/null")
-        }
-
         if (autoShell)
             sendToShellProcess("echo 'Entered adb shell'")
         else
