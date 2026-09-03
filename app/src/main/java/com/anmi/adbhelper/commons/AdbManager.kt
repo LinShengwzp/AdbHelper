@@ -14,25 +14,21 @@ import io.github.muntashirakon.adb.AbsAdbConnectionManager
 import java.io.File
 import java.io.PrintStream
 import java.security.MessageDigest
-import java.security.KeyFactory
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.PrivateKey
 import java.security.cert.Certificate
-import java.security.spec.PKCS8EncodedKeySpec
-import java.security.spec.X509EncodedKeySpec
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import javax.security.auth.x500.X500Principal
-import kotlin.io.encoding.Base64
 
-class AdbManager private constructor(context: Context) : AbsAdbConnectionManager() {
+class AdbManager private constructor() : AbsAdbConnectionManager() {
     companion object {
         private var instance: AdbManager? = null
 
-        fun get(context: Context): AdbManager {
+        fun get(): AdbManager {
             if (instance == null) {
-                instance = AdbManager(context)
+                instance = AdbManager()
             }
             return instance!!
         }
@@ -40,10 +36,6 @@ class AdbManager private constructor(context: Context) : AbsAdbConnectionManager
 
     private val keyPair: KeyPair
     private val certificate: Certificate
-
-    private val keyDir = File(context.filesDir, "adb_keys")
-    private val privateKeyFile = File(keyDir, "adbkey.pem")
-    private val publicKeyFile = File(keyDir, "adbkey.pub.pem")
 
     init {
         api = Build.VERSION.SDK_INT
@@ -317,21 +309,13 @@ class ADB(private val context: Context) {
             it.add(0, adbPath)
         }
         val process = shell(redirect, commandList)
-        val pidStr = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) process.pid().toString() else "unsupported"
-        } catch (e: Exception) {
-            "error:${e.message}"
-        }
+        val pidStr = processPidForDiag(process)
         val home = context.filesDir.path
         diagLog("ADB_ADB invocationId=$invocationId thread=${Thread.currentThread().name} command=${commandList.joinToString(" ")} pid=$pidStr HOME=$home adbkey=${adbKeyFile().absolutePath} adbkeyPub=${adbPubKeyFile().absolutePath} redirect=$redirect")
         Thread {
             try {
                 val exitCode = process.waitFor()
-                val pidAfter = try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) process.pid().toString() else "unsupported"
-                } catch (e: Exception) {
-                    "error:${e.message}"
-                }
+                val pidAfter = processPidForDiag(process)
                 diagLog("ADB_ADB_AFTER invocationId=$invocationId pid=$pidAfter exitCode=$exitCode command=${commandList.joinToString(" ")}")
                 logAdbKeys("AFTER", invocationId)
             } catch (e: Exception) {
@@ -344,6 +328,18 @@ class ADB(private val context: Context) {
     /**
      * Send a raw shell command
      */
+    private fun processPidForDiag(process: Process): String {
+        return runCatching {
+            process.javaClass.methods
+                .firstOrNull { it.name == "pid" && it.parameterCount == 0 }
+                ?.invoke(process)
+                ?.toString()
+                ?: "unsupported"
+        }.getOrElse {
+            "unsupported:${it.javaClass.simpleName}"
+        }
+    }
+
     fun shell(redirect: Boolean, command: List<String>): Process {
         val processBuilder = ProcessBuilder(command)
             .directory(context.filesDir)
