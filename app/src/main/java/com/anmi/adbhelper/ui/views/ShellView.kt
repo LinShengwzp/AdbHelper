@@ -58,8 +58,6 @@ fun TerminalScreenView(topBar: @Composable () -> Unit = {}, viewModel: AdbViewMo
     val commandHistory = remember { mutableStateListOf<String>() }
     var historyIndex by remember { mutableIntStateOf(-1) }
 
-    viewModel.startADBServer()
-
     fun mockCommandOutput(input: String): String {
         viewModel.adb.debug("$ > $input")
         return when (input.trim()) {

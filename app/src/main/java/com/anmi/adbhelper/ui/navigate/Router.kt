@@ -128,6 +128,7 @@ fun Router() {
 
     LaunchedEffect(Unit) {
         RouterManager.setNavController(navController)
+        viewModel.startADBServer()
     }
 
 
@@ -138,7 +139,6 @@ fun Router() {
         LocalAppSettingConfig provides appConfigFlow,
         LocalAppSettingConfigViewModel provides vm
     ) {
-        viewModel.startADBServer()
         ModalNavigationDrawer(
             drawerState = drawerState,
             drawerContent = {
