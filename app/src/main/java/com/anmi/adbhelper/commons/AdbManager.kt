@@ -142,7 +142,7 @@ class ADB(private val context: Context) {
      */
     fun initServer(): Boolean {
         val invocationId = nextInvocationId()
-        val autoShellPref = sharedPrefs.getBoolean(context.getString(R.string.auto_shell_key), false)
+        val autoShellPref = sharedPrefs.getBoolean(context.getString(R.string.auto_shell_key), true)
         diagLog("ADB_INIT_SERVER invocationId=$invocationId thread=${Thread.currentThread().name} _started=${_started.value} tryingToPair=$tryingToPair shellProcessNull=${shellProcess == null} autoShell=$autoShellPref")
         if (_started.value == true || tryingToPair) {
             log("Shell already started")
